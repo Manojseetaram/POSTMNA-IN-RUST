@@ -11,6 +11,11 @@ export default function PostmanUI() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("params");
 
+  // NEW — DB Inputs
+  const [mongoUri, setMongoUri] = useState("");
+  const [dbName, setDbName] = useState("");
+  const [collection, setCollection] = useState("");
+
   const addHeader = () => setHeaders([...headers, { key: "", value: "" }]);
   const addQuery = () => setQueryParams([...queryParams, { key: "", value: "" }]);
 
@@ -34,6 +39,11 @@ export default function PostmanUI() {
           headers.filter((h) => h.key.trim()).map((h) => [h.key, h.value])
         ),
         body: body.trim() ? body : null,
+
+        // NEW: extra data for saving in user DB
+        user_mongo_uri: mongoUri.trim() ? mongoUri : null,
+        user_db: dbName.trim() ? dbName : null,
+        user_collection: collection.trim() ? collection : null,
       };
 
       const res = await fetch("http://localhost:5050/send", {
@@ -73,8 +83,6 @@ export default function PostmanUI() {
         fontFamily: "Inter, sans-serif",
       }}
     >
-      
-
       {/* Main Panel */}
       <div style={{ flex: 1, padding: 30 }}>
         {/* Request Controls */}
@@ -135,7 +143,7 @@ export default function PostmanUI() {
               transition: "0.2s",
             }}
           >
-             Send
+            Send
           </button>
         </div>
 
@@ -150,8 +158,8 @@ export default function PostmanUI() {
           <button style={tabBtn("body")} onClick={() => setActiveTab("body")}>
             Body
           </button>
-          <button style={tabBtn("auth")} onClick={() => setActiveTab("auth")}>
-            Auth
+          <button style={tabBtn("db")} onClick={() => setActiveTab("db")}>
+            DB Save
           </button>
         </div>
 
@@ -297,44 +305,56 @@ export default function PostmanUI() {
             />
           )}
 
-          {/* Auth */}
-          {activeTab === "auth" && (
+          {/* DB TAB */}
+          {activeTab === "db" && (
             <>
-              <h3 style={{ marginBottom: 10 }}>Quick Auth</h3>
-              <button
-                onClick={() => {
-                  setUrl("http://localhost:5050/signup");
-                  setMethod("POST");
-                  setBody(JSON.stringify({ email: "test@example.com", password: "12345" }, null, 2));
-                  setActiveTab("body");
-                }}
-                style={{
-                  padding: "10px 20px",
-                  background: "#00ffaa",
-                  color: "black",
-                  borderRadius: 10,
-                  marginRight: 10,
-                }}
-              >
-                Signup
-              </button>
+              <h3 style={{ marginBottom: 10, color: "#00ffaa" }}>
+                Save this request to your database
+              </h3>
 
-              <button
-                onClick={() => {
-                  setUrl("http://localhost:5050/login");
-                  setMethod("POST");
-                  setBody(JSON.stringify({ email: "test@example.com", password: "12345" }, null, 2));
-                  setActiveTab("body");
-                }}
+              <input
+                value={mongoUri}
+                onChange={(e) => setMongoUri(e.target.value)}
+                placeholder="MongoDB URI (mongodb+srv://...)"
                 style={{
-                  padding: "10px 20px",
-                  background: "#00ffaa",
-                  color: "black",
+                  width: "100%",
+                  padding: 12,
+                  marginBottom: 15,
+                  background: "rgba(0,0,0,0.3)",
                   borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "white",
                 }}
-              >
-                Login
-              </button>
+              />
+
+              <input
+                value={dbName}
+                onChange={(e) => setDbName(e.target.value)}
+                placeholder="Database Name"
+                style={{
+                  width: "100%",
+                  padding: 12,
+                  marginBottom: 15,
+                  background: "rgba(0,0,0,0.3)",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "white",
+                }}
+              />
+
+              <input
+                value={collection}
+                onChange={(e) => setCollection(e.target.value)}
+                placeholder="Collection Name"
+                style={{
+                  width: "100%",
+                  padding: 12,
+                  background: "rgba(0,0,0,0.3)",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "white",
+                }}
+              />
             </>
           )}
         </div>
