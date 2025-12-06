@@ -40,7 +40,9 @@ async fn main() {
     let history = db.collection::<Document>("history");
     let state = Arc::new(AppState { history });
 let cors = CorsLayer::new()
+    
     .allow_origin(HeaderValue::from_static("https://postmna-in-rust.vercel.app"))
+    
     .allow_methods(Any)
     .allow_headers(Any);
 
