@@ -10,9 +10,19 @@ use tokio::net::TcpListener;
 use tokio::time::Instant;
 use tower_http::cors::{Any, CorsLayer};
 
-use mongodb::{bson::{doc, DateTime}, Client, Collection};
+use mongodb::{
+    bson::{doc, DateTime},
+    Client, Collection,
+};
 use futures_util::TryStreamExt;
 
+use sha2::{Sha256, Digest};
+
+//
+// ──────────────────────────────────────────────────────────────────────────────
+//   MODELS
+// ──────────────────────────────────────────────────────────────────────────────
+//
 #[derive(Debug, Deserialize)]
 struct RequestPayload {
     method: String,
@@ -41,25 +51,53 @@ struct HistoryRecord {
     date: DateTime,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct User {
+    email: String,
+    password: String, // hashed password
+    created_at: DateTime,
+}
+
+#[derive(Debug, Deserialize)]
+struct SignupPayload {
+    email: String,
+    password: String,
+}
+
+//
+// ──────────────────────────────────────────────────────────────────────────────
+//   APP STATE
+// ──────────────────────────────────────────────────────────────────────────────
+//
 #[derive(Clone)]
 struct AppState {
     history: Collection<HistoryRecord>,
+    users: Collection<User>,
 }
 
+//
+// ──────────────────────────────────────────────────────────────────────────────
+//   MAIN FUNCTION
+// ──────────────────────────────────────────────────────────────────────────────
+//
 #[tokio::main]
 async fn main() {
-    // MongoDB connect
+    // MongoDB Connect
     let client = Client::with_uri_str("mongodb://localhost:27017")
         .await
-        .expect("❌ Failed to connect to MongoDB");
+        .expect("❌ Failed to connect MongoDB");
 
     let db = client.database("postman_clone");
+
     let history = db.collection::<HistoryRecord>("history");
+    let users = db.collection::<User>("users");
 
-    let state = AppState { history };
+    let state = AppState { history, users };
 
+    // Routes
     let app = Router::new()
         .route("/send", post(send_request))
+        .route("/signup", post(signup))
         .route("/history", get(get_history))
         .with_state(state)
         .layer(CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any));
@@ -70,6 +108,46 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+//
+// ──────────────────────────────────────────────────────────────────────────────
+//   SIGNUP HANDLER
+// ──────────────────────────────────────────────────────────────────────────────
+//
+async fn signup(
+    State(state): State<AppState>,
+    Json(payload): Json<SignupPayload>,
+) -> Json<serde_json::Value> {
+    
+    // Hash the password
+    let mut hasher = Sha256::new();
+    hasher.update(payload.password.as_bytes());
+    let hashed_password = format!("{:x}", hasher.finalize());
+
+    let user = User {
+        email: payload.email.clone(),
+        password: hashed_password,
+        created_at: DateTime::now(),
+    };
+
+    let insert_result = state.users.insert_one(user).await;
+
+    match insert_result {
+        Ok(_) => Json(serde_json::json!({
+            "status": "success",
+            "message": "User created"
+        })),
+        Err(e) => Json(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+//
+// ──────────────────────────────────────────────────────────────────────────────
+//   SEND REQUEST
+// ──────────────────────────────────────────────────────────────────────────────
+//
 async fn send_request(
     State(state): State<AppState>,
     Json(payload): Json<RequestPayload>,
@@ -77,7 +155,6 @@ async fn send_request(
     let method = payload.method.parse::<Method>().unwrap_or(Method::GET);
     let client = reqwest::Client::new();
 
-    // Build request
     let mut req = client
         .request(method.clone(), &payload.url)
         .headers(
@@ -88,7 +165,7 @@ async fn send_request(
                 .collect(),
         );
 
-    if let Some(body) = payload.body {
+    if let Some(body) = payload.body.clone() {
         req = req.body(body);
     }
 
@@ -98,6 +175,7 @@ async fn send_request(
     match resp {
         Ok(res) => {
             let status = res.status().as_u16();
+
             let headers_map = res
                 .headers()
                 .iter()
@@ -106,6 +184,7 @@ async fn send_request(
 
             let text = res.text().await.unwrap_or_default();
             let body_json = serde_json::from_str(&text).unwrap_or(serde_json::json!(text));
+
             let time = start.elapsed().as_millis();
             let size = text.len();
 
@@ -126,10 +205,11 @@ async fn send_request(
                 status,
                 time,
                 size,
-              body: body_json,
-              headers: headers_map,
+                body: body_json,
+                headers: headers_map,
             })
         }
+
         Err(err) => Json(ApiResponse {
             status: 500,
             time: 0,
@@ -140,6 +220,11 @@ async fn send_request(
     }
 }
 
+//
+// ──────────────────────────────────────────────────────────────────────────────
+//   GET HISTORY
+// ──────────────────────────────────────────────────────────────────────────────
+//
 async fn get_history(State(state): State<AppState>) -> Json<Vec<HistoryRecord>> {
     let mut cursor = state.history.find(doc! {}).await.unwrap();
 
@@ -150,9 +235,3 @@ async fn get_history(State(state): State<AppState>) -> Json<Vec<HistoryRecord>> 
 
     Json(results)
 }
-
-
-
-
-
-
