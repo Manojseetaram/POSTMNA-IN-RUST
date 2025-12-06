@@ -14,48 +14,41 @@ export default function Home() {
   const addHeader = () => setHeaders([...headers, { key: "", value: "" }]);
   const addQuery = () => setQueryParams([...queryParams, { key: "", value: "" }]);
 
-  const handleRequest = async () => {
-    if (!url) return alert("Enter URL");
+  const sendToBackend = async () => {
+    if (!url.trim()) return alert("Enter URL");
 
     setLoading(true);
     setResponse(null);
 
     try {
-      // Build Query Parameters
-      let finalUrl = url;
-      const paramsObj: any = {};
+      // prepare headers & queries
+      const queryString = queryParams
+        .filter((q) => q.key.trim())
+        .map((q) => `${encodeURIComponent(q.key)}=${encodeURIComponent(q.value)}`)
+        .join("&");
 
-      queryParams.forEach((p) => {
-        if (p.key.trim() !== "") paramsObj[p.key] = p.value;
-      });
+      const finalUrl = queryString ? `${url}?${queryString}` : url;
 
-      const qs = new URLSearchParams(paramsObj).toString();
-      if (qs) finalUrl = `${url}?${qs}`;
-
-      // Build Headers
-      const headersObj: any = {};
-      headers.forEach((h) => {
-        if (h.key.trim() !== "") headersObj[h.key] = h.value;
-      });
-
-      // Build Request Options
-      const options: any = {
+      const payload = {
         method,
-        headers: headersObj,
+        url: finalUrl,
+        headers: Object.fromEntries(
+          headers.filter((h) => h.key.trim()).map((h) => [h.key, h.value])
+        ),
+        query: Object.fromEntries(
+          queryParams.filter((q) => q.key.trim()).map((q) => [q.key, q.value])
+        ),
+        body: body.trim() ? body : null,
       };
 
-      if (method !== "GET" && body.trim() !== "") {
-        options.body = body;
-      }
-
-      const res = await fetch(finalUrl, options);
-      const data = await res.json().catch(() => "Non-JSON response");
-
-      setResponse({
-        status: res.status,
-        statusText: res.statusText,
-        data,
+      const res = await fetch("http://localhost:5050/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
+
+      const data = await res.json();
+      setResponse(data);
     } catch (err) {
       setResponse({ error: String(err) });
     }
@@ -64,15 +57,15 @@ export default function Home() {
   };
 
   return (
-    <div style={{ padding: 20, fontFamily: "sans-serif" }}>
-      <h1 style={{ fontSize: 28 }}>My Own Postman 🔥</h1>
+    <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 900, margin: "auto" }}>
+      <h1 style={{ fontSize: 32, fontWeight: "bold" }}>🚀 Rust + Next.js Postman Clone</h1>
 
       {/* METHOD + URL */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
         <select
           value={method}
           onChange={(e) => setMethod(e.target.value)}
-          style={{ padding: 10 }}
+          style={{ padding: 12, width: 120 }}
         >
           <option>GET</option>
           <option>POST</option>
@@ -83,22 +76,22 @@ export default function Home() {
 
         <input
           type="text"
-          placeholder="Enter request URL"
+          placeholder="Enter URL (https://...)"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          style={{ flex: 1, padding: 10 }}
+          style={{ flex: 1, padding: 12 }}
         />
 
         <button
-          onClick={handleRequest}
-          style={{ padding: "10px 20px", background: "black", color: "white" }}
+          onClick={sendToBackend}
+          style={{ padding: "12px 20px", background: "black", color: "white" }}
         >
-          Send
+          Send ▶
         </button>
       </div>
 
       {/* QUERY PARAMS */}
-      <h3>Query Params</h3>
+      <h3 style={{ marginTop: 30 }}>Query Params</h3>
       {queryParams.map((p, i) => (
         <div key={i} style={{ display: "flex", gap: 10, marginBottom: 5 }}>
           <input
@@ -126,11 +119,11 @@ export default function Home() {
       <button onClick={addQuery}>+ Add Query Param</button>
 
       {/* HEADERS */}
-      <h3 style={{ marginTop: 20 }}>Headers</h3>
+      <h3 style={{ marginTop: 30 }}>Headers</h3>
       {headers.map((h, i) => (
         <div key={i} style={{ display: "flex", gap: 10, marginBottom: 5 }}>
           <input
-            placeholder="Content-Type"
+            placeholder="Header Key"
             value={h.key}
             onChange={(e) => {
               const arr = [...headers];
@@ -140,7 +133,7 @@ export default function Home() {
             style={{ padding: 8 }}
           />
           <input
-            placeholder="application/json"
+            placeholder="Header Value"
             value={h.value}
             onChange={(e) => {
               const arr = [...headers];
@@ -154,33 +147,36 @@ export default function Home() {
       <button onClick={addHeader}>+ Add Header</button>
 
       {/* BODY */}
-      {(method === "POST" ||
-        method === "PUT" ||
-        method === "PATCH") && (
+      {method !== "GET" && (
         <>
-          <h3 style={{ marginTop: 20 }}>Body (JSON)</h3>
+          <h3 style={{ marginTop: 30 }}>Body</h3>
           <textarea
+            placeholder='{"name": "Manoj"}'
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={6}
-            style={{ width: "100%", padding: 10, fontFamily: "monospace" }}
-            placeholder='{"name": "Manoj"}'
+            style={{
+              width: "100%",
+              padding: 10,
+              fontFamily: "monospace",
+              borderRadius: 6,
+            }}
           />
         </>
       )}
 
       {/* RESPONSE */}
-      <h2 style={{ marginTop: 30 }}>Response</h2>
+      <h2 style={{ marginTop: 40 }}>Response</h2>
       {loading ? (
-        <p>Loading...</p>
+        <p>⏳ Loading...</p>
       ) : (
         <pre
           style={{
-            background: "#f5f5f5",
-            padding: 15,
-            borderRadius: 5,
-            whiteSpace: "pre-wrap",
+            background: "#f2f2f2",
+            padding: 20,
+            borderRadius: 6,
             overflowX: "auto",
+            maxHeight: 400,
           }}
         >
           {response ? JSON.stringify(response, null, 2) : "No response yet"}

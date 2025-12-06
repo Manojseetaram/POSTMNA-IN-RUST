@@ -1,5 +1,6 @@
 use axum::{
-    routing::post,
+    routing::{get, post},
+    extract::State,
     Json, Router,
 };
 use reqwest::Method;
@@ -9,12 +10,14 @@ use tokio::net::TcpListener;
 use tokio::time::Instant;
 use tower_http::cors::{Any, CorsLayer};
 
+use mongodb::{bson::{doc, DateTime}, Client, Collection};
+use futures_util::TryStreamExt;
+
 #[derive(Debug, Deserialize)]
 struct RequestPayload {
     method: String,
     url: String,
     headers: HashMap<String, String>,
-    query: HashMap<String, String>,
     body: Option<String>,
 }
 
@@ -27,34 +30,60 @@ struct ApiResponse {
     headers: HashMap<String, String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct HistoryRecord {
+    method: String,
+    url: String,
+    status: u16,
+    response_time: u128,
+    size: usize,
+    response_body: serde_json::Value,
+    date: DateTime,
+}
+
+#[derive(Clone)]
+struct AppState {
+    history: Collection<HistoryRecord>,
+}
+
 #[tokio::main]
 async fn main() {
+    // MongoDB connect
+    let client = Client::with_uri_str("mongodb://localhost:27017")
+        .await
+        .expect("❌ Failed to connect to MongoDB");
+
+    let db = client.database("postman_clone");
+    let history = db.collection::<HistoryRecord>("history");
+
+    let state = AppState { history };
+
     let app = Router::new()
         .route("/send", post(send_request))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_headers(Any)
-                .allow_methods(Any),
-        );
+        .route("/history", get(get_history))
+        .with_state(state)
+        .layer(CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any));
 
     println!("🚀 Rust Postman Backend running on http://localhost:5050");
 
-    // NEW: Axum 0.7 server syntax
     let listener = TcpListener::bind("0.0.0.0:5050").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn send_request(Json(payload): Json<RequestPayload>) -> Json<ApiResponse> {
+async fn send_request(
+    State(state): State<AppState>,
+    Json(payload): Json<RequestPayload>,
+) -> Json<ApiResponse> {
     let method = payload.method.parse::<Method>().unwrap_or(Method::GET);
-
     let client = reqwest::Client::new();
+
+    // Build request
     let mut req = client
-        .request(method, &payload.url)
+        .request(method.clone(), &payload.url)
         .headers(
             payload
                 .headers
-                .into_iter()
+                .iter()
                 .map(|(k, v)| (k.parse().unwrap(), v.parse().unwrap()))
                 .collect(),
         );
@@ -64,9 +93,9 @@ async fn send_request(Json(payload): Json<RequestPayload>) -> Json<ApiResponse> 
     }
 
     let start = Instant::now();
-    let response = req.send().await;
+    let resp = req.send().await;
 
-    match response {
+    match resp {
         Ok(res) => {
             let status = res.status().as_u16();
             let headers_map = res
@@ -76,17 +105,29 @@ async fn send_request(Json(payload): Json<RequestPayload>) -> Json<ApiResponse> 
                 .collect::<HashMap<_, _>>();
 
             let text = res.text().await.unwrap_or_default();
+            let body_json = serde_json::from_str(&text).unwrap_or(serde_json::json!(text));
+            let time = start.elapsed().as_millis();
             let size = text.len();
 
-            let parsed =
-                serde_json::from_str(&text).unwrap_or(serde_json::json!(text));
+            // Save history
+            let record = HistoryRecord {
+                method: payload.method.clone(),
+                url: payload.url.clone(),
+                status,
+                response_time: time,
+                size,
+                response_body: body_json.clone(),
+                date: DateTime::now(),
+            };
+
+            let _ = state.history.insert_one(record).await;
 
             Json(ApiResponse {
                 status,
-                time: start.elapsed().as_millis(),
+                time,
                 size,
-                body: parsed,
-                headers: headers_map,
+              body: body_json,
+              headers: headers_map,
             })
         }
         Err(err) => Json(ApiResponse {
@@ -98,3 +139,20 @@ async fn send_request(Json(payload): Json<RequestPayload>) -> Json<ApiResponse> 
         }),
     }
 }
+
+async fn get_history(State(state): State<AppState>) -> Json<Vec<HistoryRecord>> {
+    let mut cursor = state.history.find(doc! {}).await.unwrap();
+
+    let mut results = Vec::new();
+    while let Some(doc) = cursor.try_next().await.unwrap() {
+        results.push(doc);
+    }
+
+    Json(results)
+}
+
+
+
+
+
+
