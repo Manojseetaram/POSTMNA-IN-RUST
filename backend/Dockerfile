@@ -32,7 +32,7 @@ WORKDIR /app
 COPY --from=builder /usr/src/app/target/release/backend .
 
 # Expose port
-EXPOSE 5050
+EXPOSE 10000
 
 # Environment variables
 ENV RUST_LOG=info
