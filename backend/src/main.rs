@@ -43,7 +43,6 @@ struct SendResponse {
 struct AppState {}
 
 #[tokio::main]
-
 async fn main() {
     let state = Arc::new(AppState {});
 
